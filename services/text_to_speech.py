@@ -24,7 +24,7 @@ MESSAGE_COMPRESSIONS = {0: "no compression",
 appid = "3415704595"
 token = "o2nrLg4vCSnrx4Me_N2oTVQrXcU6pLTZ"
 cluster = "volcano_tts"
-voice_type = "zh_female_qingxinnvsheng_mars_bigtts"
+voice_type = "ICL_zh_female_huoponvhai_tob"
 host = "openspeech.bytedance.com"
 api_url = f"wss://{host}/api/v1/tts/ws_binary"
 
@@ -73,77 +73,59 @@ async def submit(text: str):
     full_client_request = bytearray(default_header)
     full_client_request.extend((len(payload_bytes)).to_bytes(4, 'big'))  # payload size(4 bytes)
     full_client_request.extend(payload_bytes)  # payload
-    print("\n------------------------ 'submit' -------------------------")
-    print("request json: ", submit_request_json)
-    print("\nrequest bytes: ", full_client_request)
-    file_to_save = open("test_submit.mp3", "wb")
+    
     header = {"Authorization": f"Bearer; {token}"}
     async with websockets.connect(api_url, additional_headers=header, ping_interval=None) as ws:
         await ws.send(full_client_request)
         while True:
             res = await ws.recv()
-            done = parse_response(res, file_to_save)
-            if done:
-                file_to_save.close()
+            async for chunk in parse_and_yield_response(res):
+                yield chunk
+            if await should_stop(res):
                 break
-        print("\nclosing the connection...")
 
 
-def parse_response(res, file):
-    print("--------------------------- response ---------------------------")
+async def should_stop(res):
+    protocol_version = res[0] >> 4
+    header_size = res[0] & 0x0f
+    message_type = res[1] >> 4
+    message_type_specific_flags = res[1] & 0x0f
+    payload = res[header_size*4:]
+
+    if message_type == 0xb:  # audio-only server response
+        if message_type_specific_flags == 0:  # no sequence number as ACK
+            return False
+        sequence_number = int.from_bytes(payload[:4], "big", signed=True)
+        return sequence_number < 0
+    elif message_type == 0xf:  # error message
+        return True
+    return False
+
+
+async def parse_and_yield_response(res):
     protocol_version = res[0] >> 4
     header_size = res[0] & 0x0f
     message_type = res[1] >> 4
     message_type_specific_flags = res[1] & 0x0f
     serialization_method = res[2] >> 4
     message_compression = res[2] & 0x0f
-    reserved = res[3]
-    header_extensions = res[4:header_size*4]
     payload = res[header_size*4:]
-    print(f"            Protocol version: {protocol_version:#x} - version {protocol_version}")
-    print(f"                 Header size: {header_size:#x} - {header_size * 4} bytes ")
-    print(f"                Message type: {message_type:#x} - {MESSAGE_TYPES[message_type]}")
-    print(f" Message type specific flags: {message_type_specific_flags:#x} - {MESSAGE_TYPE_SPECIFIC_FLAGS[message_type_specific_flags]}")
-    print(f"Message serialization method: {serialization_method:#x} - {MESSAGE_SERIALIZATION_METHODS[serialization_method]}")
-    print(f"         Message compression: {message_compression:#x} - {MESSAGE_COMPRESSIONS[message_compression]}")
-    print(f"                    Reserved: {reserved:#04x}")
-    if header_size != 1:
-        print(f"           Header extensions: {header_extensions}")
+
     if message_type == 0xb:  # audio-only server response
         if message_type_specific_flags == 0:  # no sequence number as ACK
-            print("                Payload size: 0")
-            return False
-        else:
-            sequence_number = int.from_bytes(payload[:4], "big", signed=True)
-            payload_size = int.from_bytes(payload[4:8], "big", signed=False)
-            payload = payload[8:]
-            print(f"             Sequence number: {sequence_number}")
-            print(f"                Payload size: {payload_size} bytes")
-        file.write(payload)
-        if sequence_number < 0:
-            return True
-        else:
-            return False
-    elif message_type == 0xf:
+            return
+        sequence_number = int.from_bytes(payload[:4], "big", signed=True)
+        payload_size = int.from_bytes(payload[4:8], "big", signed=False)
+        audio_data = payload[8:]
+        yield audio_data
+    elif message_type == 0xf:  # error message
         code = int.from_bytes(payload[:4], "big", signed=False)
         msg_size = int.from_bytes(payload[4:8], "big", signed=False)
         error_msg = payload[8:]
         if message_compression == 1:
             error_msg = gzip.decompress(error_msg)
         error_msg = str(error_msg, "utf-8")
-        print(f"          Error message code: {code}")
-        print(f"          Error message size: {msg_size} bytes")
-        print(f"               Error message: {error_msg}")
-        return True
-    elif message_type == 0xc:
-        msg_size = int.from_bytes(payload[:4], "big", signed=False)
-        payload = payload[4:]
-        if message_compression == 1:
-            payload = gzip.decompress(payload)
-        print(f"            Frontend message: {payload}")
-    else:
-        print("undefined message type!")
-        return True
+        print(f"Error: {error_msg}")
 
 
 if __name__ == '__main__':
