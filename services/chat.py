@@ -7,9 +7,10 @@ api_key = 'app-HEgO3Ovjv7wTurbw5XtLhbWc'
 
 
 class ChatRequest(BaseModel):
-    query: str
+    query: str | None = None
     user_id: str
     conversation_id: str | None = ""
+    audio_path: str | None = None  # 新增语音文件路径字段，可选
 
 
 class ChatResponse(BaseModel):
@@ -23,7 +24,8 @@ async def chat_messages(chat_request: ChatRequest) -> ChatResponse:
     文本对话，调用 dify 的 API
     """
     try:
-        url = "http://127.0.0.1:8081/v1/chat-messages"
+        url = "http://183.56.165.184:8081/v1/chat-messages"
+        # url = "http://127.0.0.1:8081/v1/chat-messages"
 
         data = {
             "inputs": {},

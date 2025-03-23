@@ -1,4 +1,6 @@
 *.mp3
+*.m4a
+*.mav
 .idea
 .venv
 __pycache__
