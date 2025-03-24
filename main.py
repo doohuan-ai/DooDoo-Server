@@ -13,7 +13,7 @@ app = FastAPI()
 async def chat(chat_request: ChatRequest):
     # 如果提供了语音文件，先进行语音识别
     if chat_request.audio_path:
-        speech_result = execute_one({
+        speech_result = await execute_one({
             'id': 1,
             'path': chat_request.audio_path
         })

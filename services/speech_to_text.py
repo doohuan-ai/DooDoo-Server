@@ -272,7 +272,7 @@ class AsrWsClient:
             raise Exception("Unsupported format")
 
 
-def execute_one(audio_item, **kwargs):
+async def execute_one(audio_item, **kwargs):
     assert 'id' in audio_item
     assert 'path' in audio_item
     audio_id = audio_item['id']
@@ -281,12 +281,12 @@ def execute_one(audio_item, **kwargs):
         audio_path=audio_path,
         **kwargs
     )
-    result = asyncio.run(asr_http_client.execute())
+    result = await asr_http_client.execute()
     return {"id": audio_id, "path": audio_path, "result": result}
 
 
-def test_stream():
-    result = execute_one(
+async def test_stream():
+    result = await execute_one(
         {
             'id': 1,
             "path": "/home/cafe100/Github/DooDoo-Server/frontend/2.wav"

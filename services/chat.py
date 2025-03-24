@@ -10,7 +10,7 @@ class ChatRequest(BaseModel):
     query: str | None = None
     user_id: str
     conversation_id: str | None = ""
-    audio_path: str | None = None  # 新增语音文件路径字段，可选
+    audio_path: str | None = None
 
 
 class ChatResponse(BaseModel):
