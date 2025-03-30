@@ -1,6 +1,7 @@
 import asyncio
 import os
 import aiohttp
+import base64
 from services.microphone_speech import MicrophoneAsrClient
 
 
@@ -97,6 +98,15 @@ async def mic_chat_test():
                     print(f"会话ID: {response.headers.get('X-Conversation-Id')}")
                     print(f"消息ID: {response.headers.get('X-Message-Id')}")
                     
+                    # 解码并打印响应文本
+                    response_text_base64 = response.headers.get('X-Response-Text-Base64')
+                    if response_text_base64:
+                        try:
+                            response_text = base64.b64decode(response_text_base64).decode('utf-8')
+                            print(f"AI回复: {response_text}")
+                        except Exception as e:
+                            print(f"解码响应文本时出错: {e}")
+                    
                     print("\n集成测试完成！")
                     print(f"识别的文本: {recognized_text}")
                     print(f"聊天响应保存到: {output_file}")
@@ -109,9 +119,6 @@ async def mic_chat_test():
 
 
 def main():
-    """
-    主函数
-    """
     asyncio.run(mic_chat_test())
 
 

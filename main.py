@@ -3,14 +3,14 @@
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from services.text_to_speech import submit
 from services.speech_to_text import execute_one
 from services.microphone_speech import MicrophoneAsrClient
 from services.chat import chat_messages, ChatRequest
 import json
 import asyncio
-import os
+import base64
 
 app = FastAPI()
 
@@ -47,15 +47,23 @@ async def chat(chat_request: ChatRequest):
     # 获取聊天回复
     chat_response = await chat_messages(chat_request)
 
-    return StreamingResponse(
+    # 将回答文本转为 Base64 编码，避免 HTTP 头不支持 Unicode 的问题
+    answer_base64 = base64.b64encode(chat_response.answer.encode('utf-8')).decode('ascii')
+
+    # 创建自定义响应
+    response = StreamingResponse(
         audio_generator(chat_response.answer),
         media_type="audio/mpeg",
         headers={
             "Content-Disposition": "attachment; filename=chat_response.mp3",
             "X-Conversation-Id": chat_response.conversation_id,
-            "X-Message-Id": chat_response.message_id
+            "X-Message-Id": chat_response.message_id,
+            "X-Response-Text-Base64": answer_base64,
+            "Access-Control-Expose-Headers": "X-Conversation-Id, X-Message-Id, X-Response-Text-Base64"
         }
     )
+    
+    return response
 
 
 @app.websocket("/mic-speech-recognition/")
@@ -107,7 +115,7 @@ async def websocket_mic_speech_recognition(websocket: WebSocket):
 
 async def process_recognition(websocket: WebSocket, client: MicrophoneAsrClient):
     """
-    处理语音识别并发送结果到WebSocket客户端
+    处理语音识别并发送结果到 WebSocket 客户端
     """
     async for result in client.start_recognition():
         await websocket.send_json({

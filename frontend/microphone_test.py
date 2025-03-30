@@ -1,9 +1,11 @@
 import asyncio
-import os
 from services.microphone_speech import MicrophoneAsrClient
 
+
 async def test_microphone_recognition():
-    """测试麦克风实时语音识别"""
+    """
+    测试麦克风实时语音识别
+    """
     print("===== 麦克风实时语音识别测试 =====")
     
     client = MicrophoneAsrClient()
@@ -46,10 +48,11 @@ async def test_microphone_recognition():
     print(f"识别完成！最终结果: {final_text}")
     return final_text
 
+
 def main():
-    """主函数"""
     result = asyncio.run(test_microphone_recognition())
     print(f"测试完成，识别结果: {result}")
 
+
 if __name__ == "__main__":
-    main() 
+    main()
