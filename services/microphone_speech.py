@@ -237,6 +237,96 @@ class MicrophoneAsrClient:
         获取识别的文本
         """
         return self.recognized_text
+        
+    async def process_android_audio_buffer(self) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        处理来自安卓客户端的音频缓冲区数据并进行语音识别
+        """
+        self.is_running = True
+        reqid = str(uuid.uuid4())
+        seq = 1
+        
+        # 构建初始请求
+        request_params = self.construct_request(reqid)
+        payload_bytes = str.encode(json.dumps(request_params))
+        payload_bytes = gzip.compress(payload_bytes)
+        
+        full_client_request = bytearray(generate_header(message_type_specific_flags=POS_SEQUENCE))
+        full_client_request.extend(generate_before_payload(sequence=seq))
+        full_client_request.extend((len(payload_bytes)).to_bytes(4, 'big'))
+        full_client_request.extend(payload_bytes)
+        
+        header = {
+            "X-Api-Resource-Id": "volc.bigasr.sauc.duration",
+            "X-Api-Access-Key": "o2nrLg4vCSnrx4Me_N2oTVQrXcU6pLTZ",
+            "X-Api-App-Key": "3415704595",
+            "X-Api-Request-Id": reqid
+        }
+        
+        try:
+            async with websockets.connect(
+                self.ws_url, 
+                additional_headers=header, 
+                max_size=1000000000
+            ) as ws:
+                # 发送初始请求
+                await ws.send(full_client_request)
+                res = await ws.recv()
+                result = parse_response(res)
+                seq += 1
+                
+                # 开始音频处理循环
+                while self.is_running:
+                    # 检查音频缓冲区中是否有足够的数据
+                    if len(self.audio_buffer) >= self.segment_size:
+                        chunk_data = bytes(self.audio_buffer[:self.segment_size])
+                        self.audio_buffer = self.audio_buffer[self.segment_size:]
+                        
+                        seq, result = await self.process_audio_frame(chunk_data, ws, seq)
+                        
+                        # 如果结果中包含识别文本
+                        if 'payload_msg' in result and 'result' in result['payload_msg']:
+                            asr_result = result['payload_msg']['result']
+                            if 'text' in asr_result:
+                                self.recognized_text = asr_result['text']
+                                # 产生结果
+                                yield {
+                                    "text": self.recognized_text,
+                                    "is_final": False
+                                }
+                    else:
+                        # 如果缓冲区中数据不足，等待一小段时间
+                        await asyncio.sleep(0.01)
+                        
+                        # 如果停止运行并且缓冲区还有剩余数据，发送最后一段数据
+                        if not self.is_running and len(self.audio_buffer) > 0:
+                            chunk_data = bytes(self.audio_buffer)
+                            self.audio_buffer = bytearray()
+                            seq, result = await self.process_audio_frame(chunk_data, ws, seq)
+                
+                # 发送结束信号
+                final_result = await self.send_end_signal(ws, seq)
+                
+                # 获取最终结果
+                if 'payload_msg' in final_result and 'result' in final_result['payload_msg']:
+                    asr_result = final_result['payload_msg']['result']
+                    if 'text' in asr_result:
+                        self.recognized_text = asr_result['text']
+                        # 产生最终结果
+                        yield {
+                            "text": self.recognized_text,
+                            "is_final": True
+                        }
+                        
+        except Exception as e:
+            print(f"处理安卓音频时出现错误: {e}")
+            raise
+            
+    def add_audio_data(self, audio_data: bytes):
+        """
+        添加来自安卓客户端的音频数据到缓冲区
+        """
+        self.audio_buffer.extend(audio_data)
 
 
 async def test_microphone_recognition():

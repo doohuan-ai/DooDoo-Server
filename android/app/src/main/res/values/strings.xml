@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">DooDoo 语音聊天</string>
+    <string name="start_recording">开始录音</string>
+    <string name="stop_recording">停止录音</string>
+    <string name="recognition_result">识别结果：</string>
+    <string name="chat_response">对话回复：</string>
+    <string name="connection_status">连接状态：</string>
+    <string name="disconnected">未连接</string>
+    <string name="connected">已连接</string>
+    <string name="connecting">连接中...</string>
+    <string name="connection_failed">连接失败</string>
+    <string name="speaking">语音播放中...</string>
+</resources> 
