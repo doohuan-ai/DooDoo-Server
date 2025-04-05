@@ -10,7 +10,6 @@ class ChatRequest(BaseModel):
     query: str | None = None
     user_id: str
     conversation_id: str | None = ""
-    audio_path: str | None = None
 
 
 class ChatResponse(BaseModel):

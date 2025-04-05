@@ -3,9 +3,8 @@
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse
 from services.text_to_speech import submit
-from services.speech_to_text import execute_one
 from services.microphone_speech import MicrophoneAsrClient
 from services.chat import chat_messages, ChatRequest
 import json
@@ -15,33 +14,24 @@ import base64
 app = FastAPI()
 
 # 添加静态文件服务
-app.mount("/static", StaticFiles(directory="frontend"), name="static")
+app.mount("/static", StaticFiles(directory="web"), name="static")
 
 
-# 首页路由，重定向到语音识别页面
+# 首页路由，重定向到语音聊天页面
 @app.get("/")
 async def redirect_to_mic_page():
-    return FileResponse("frontend/mic_speech_recognition.html")
+    return FileResponse("frontend/voice_chat.html")
 
 
-# 语音识别页面
-@app.get("/mic")
-async def mic_page():
-    return FileResponse("frontend/mic_speech_recognition.html")
+# 语音聊天页面
+@app.get("/voice-chat")
+async def voice_chat_page():
+    return FileResponse("frontend/voice_chat.html")
 
 
 @app.post("/chat/")
 async def chat(chat_request: ChatRequest):
-    # 如果提供了语音文件，先进行语音识别
-    if chat_request.audio_path:
-        speech_result = await execute_one({
-            'id': 1,
-            'path': chat_request.audio_path
-        })
-        # 从语音识别结果中获取文本
-        recognized_text = speech_result.get("result").get("payload_msg").get("result").get("text")
-        chat_request.query = recognized_text
-    elif not chat_request.query:
+    if not chat_request.query:
         raise HTTPException(status_code=400, detail="Either query or audio_path must be provided")
 
     # 获取聊天回复
@@ -66,10 +56,10 @@ async def chat(chat_request: ChatRequest):
     return response
 
 
-@app.websocket("/mic-speech-recognition/")
-async def websocket_mic_speech_recognition(websocket: WebSocket):
+@app.websocket("/voice-chat/")
+async def websocket_voice_chat(websocket: WebSocket):
     """
-    WebSocket端点，用于实时麦克风语音识别
+    WebSocket端点，用于实时语音聊天（语音识别+对话+语音合成）
     """
     await websocket.accept()
     
@@ -82,21 +72,24 @@ async def websocket_mic_speech_recognition(websocket: WebSocket):
             cmd = json.loads(message)
             
             if cmd["action"] == "start":
-                # 开始识别
+                # 开始语音聊天
                 if recognition_task is None:
-                    recognition_task = asyncio.create_task(process_recognition(websocket, client))
+                    user_id = cmd.get("user_id", "default_user")
+                    conversation_id = cmd.get("conversation_id", "")
+                    recognition_task = asyncio.create_task(
+                        process_voice_chat(websocket, client, user_id, conversation_id)
+                    )
                     await websocket.send_json({"status": "started"})
                 else:
                     await websocket.send_json({"status": "error", "message": "Recognition already in progress"})
                     
             elif cmd["action"] == "stop":
-                # 停止识别
+                # 停止语音聊天
                 if recognition_task is not None:
                     client.stop_recognition()
                     await recognition_task
                     recognition_task = None
-                    final_text = client.get_recognized_text()
-                    await websocket.send_json({"status": "stopped", "final_text": final_text})
+                    await websocket.send_json({"status": "stopped"})
                 else:
                     await websocket.send_json({"status": "error", "message": "No recognition in progress"})
     
@@ -113,18 +106,66 @@ async def websocket_mic_speech_recognition(websocket: WebSocket):
         await websocket.send_json({"status": "error", "message": str(e)})
 
 
-async def process_recognition(websocket: WebSocket, client: MicrophoneAsrClient):
+async def process_voice_chat(websocket: WebSocket, client: MicrophoneAsrClient, user_id: str, conversation_id: str):
     """
-    处理语音识别并发送结果到 WebSocket 客户端
+    处理语音聊天流程：语音识别 -> 文本对话 -> 语音合成
     """
     async for result in client.start_recognition():
+        # 发送实时识别结果
         await websocket.send_json({
             "status": "recognizing",
             "text": result["text"],
             "is_final": result["is_final"]
         })
-        if result["is_final"]:
-            break
+        
+        # 当识别完成时，发送到对话系统并获取回复
+        if result["is_final"] and result["text"].strip():
+            # 创建聊天请求
+            chat_request = ChatRequest(
+                query=result["text"],
+                user_id=user_id,
+                conversation_id=conversation_id
+            )
+            
+            # 获取聊天回复
+            try:
+                chat_response = await chat_messages(chat_request)
+                
+                # 发送文本回复
+                await websocket.send_json({
+                    "status": "chat_response",
+                    "text": chat_response.answer,
+                    "conversation_id": chat_response.conversation_id,
+                    "message_id": chat_response.message_id
+                })
+                
+                # 开始语音合成并发送音频数据
+                await websocket.send_json({
+                    "status": "synthesizing",
+                    "message": "开始语音合成..."
+                })
+                
+                # 发送音频数据
+                audio_chunks = []
+                async for chunk in submit(chat_response.answer):
+                    # 将二进制数据转换为Base64编码
+                    chunk_base64 = base64.b64encode(chunk).decode('ascii')
+                    audio_chunks.append(chunk_base64)
+                
+                # 发送合成完成的音频数据
+                await websocket.send_json({
+                    "status": "synthesis_complete",
+                    "audio_data": audio_chunks
+                })
+                
+                # 更新会话ID
+                conversation_id = chat_response.conversation_id
+                
+            except Exception as e:
+                await websocket.send_json({
+                    "status": "error",
+                    "message": f"对话或语音合成出错: {str(e)}"
+                })
 
 
 async def audio_generator(text: str):
